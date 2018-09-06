@@ -11,6 +11,9 @@
 % 5) Create new data, with ERP just after time point of interest, with phase-resetting model
 % 6) Create new data, with Kc evoked at time point of interest, with additive model (nearly same as 4)
 % 7) Add alpha ERD (and theta ERS?) on to ERP model
+% 8) Signal has frequency randomly assigned between 8-12 Hz (constant though for all 100 trials); Use Hilbert to determine this frequency then FFT at that frequency
+% 8a) like 4, ERP additive
+% 8b) like 5, ERP phase-reset
 
 clear all
 
@@ -19,16 +22,19 @@ clear all
 run1=0;
 run2=0;
 run3=0;
-run4=1;
+run4=0;
 run5=0;
 run6=0;
 run7=0;
+run8=0;
+run9=1;
 
 ft_defaults;
 
 fsample=1000;
 time=0:1/fsample:8; % 8s long trial
 wdr='D:\phase_estimation\';
+addpath('D:\phase_estimation\phasereset_modelling')
 wavwidth=[4 5 6 7 8];
 wavgwidth=[3 4];
 
@@ -436,7 +442,6 @@ if run1
   legend({'delta-filtered', 'theta-filtered', 'alpha-filtered'})
   set(get(6,'Children'),'xTickLabel',{'filt-ord 1' 'fo 2' 'fo 3' 'fo 4'})
   
-  break
   % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   % 1b) FFT + taper
   
@@ -3114,7 +3119,7 @@ end
 if run5
   
   clearvars -except run* time wdr fsample wav*width
-  addpath('D:/Matlab/phasereset_modelling')
+  addpath('D:\phase_estimation\phasereset_modelling')
   halftimeind=round(length(time)/2);
   numtrials=100;
   
@@ -3129,10 +3134,12 @@ if run5
   resetwin=[40 20 0];
   
   % Model 1:  frequency shift to meet phase at later time; return to new frequency
+  % Model 12: Same effectively as 1, except modelled as linear phase procession (at new frequency not determinted explicitly); return to new frequency
   % Model 2:  frequency shift to meet phase at later time; return to original frequency
+  % Model 22: Same effectively as 2, except modelled as linear phase procession (at new frequency not determinted explicitly); return to original frequency
   % Model 3:  short time to meet new phase via line;
   % Model 4:  short time to meet new phase via line; new phase determined by 'phase-response-curve'
-  modeluse=3;
+  modeluse=12;
   
   for frequse=foilim(1):foilim(2)
     for erpampind=1:length(resetwin)
@@ -3151,11 +3158,15 @@ if run5
         switch modeluse
           case 1
             [raw{frequse,erpampind}.trial{tr}] = phasereset_jz (time, fsample, frequse, foilim(1), foilim(2), length(time)-1, length(time), 1);
+          case 12
+            [raw{frequse,erpampind}.trial{tr}] = phasereset_jz_linphase_postjitter (time, frequse, length(time)-1, length(time), 0 );
           case 3
             %       [raw{frequse,erpampind}.trial{tr}] = phasereset_jz_jump (time, frequse, length(time)-1, length(time), numones(erpampind) );
             [raw{frequse,erpampind}.trial{tr}] = phasereset_jz_jump (time, frequse, length(time)-1, length(time), 0 );
           case 2
             [raw{frequse,erpampind}.trial{tr}] = phasereset_jz_steadybasefreq (time, fsample, frequse, foilim(1), foilim(2), length(time)-1, length(time), 1);
+          case 22
+            [raw{frequse,erpampind}.trial{tr}] = phasereset_jz_linphase (time, frequse, length(time)-1, length(time), 0 );
           case 4 % phase response curve
             [raw{frequse,erpampind}.trial{tr}] = phasereset_jz_jump_prc (time, frequse, length(time)-1, length(time), 0 );
         end
@@ -3172,11 +3183,15 @@ if run5
         switch modeluse
           case 1
             [rawpr{frequse,erpampind}.trial{tr},trueang_prenoise(tr,frequse,erpampind),newfreq(tr,frequse,erpampind)] = phasereset_jz (time, fsample, frequse, foilim(1), foilim(2), halftimeind, halftimeind+.1*fsample, numones(erpampind));
+          case 12
+            [rawpr{frequse,erpampind}.trial{tr},trueang_prenoise(tr,frequse,erpampind),resetang(tr,frequse,erpampind)] = phasereset_jz_linphase_postjitter (time, frequse, halftimeind, halftimeind+20, resetwin(erpampind) );
           case 3
             %       [rawpr{frequse,erpampind}.trial{tr},trueang_prenoise(tr,frequse,erpampind)] = phasereset_jz_jump (time, frequse, halftimeind, halftimeind+20, numones(erpampind) );
             [rawpr{frequse,erpampind}.trial{tr},trueang_prenoise(tr,frequse,erpampind),resetang(tr,frequse,erpampind)] = phasereset_jz_jump (time, frequse, halftimeind, halftimeind+20, resetwin(erpampind) );
           case 2
             [rawpr{frequse,erpampind}.trial{tr},trueang_prenoise(tr,frequse,erpampind)] = phasereset_jz_steadybasefreq (time, fsample, frequse, foilim(1), foilim(2), halftimeind, halftimeind+.1*fsample, numones(erpampind));
+          case 22
+            [rawpr{frequse,erpampind}.trial{tr},trueang_prenoise(tr,frequse,erpampind),resetang(tr,frequse,erpampind)] = phasereset_jz_linphase (time, frequse, halftimeind, halftimeind+20, resetwin(erpampind) );
           case 4
         end
         rawpnpr{frequse,erpampind}.trial{tr}=rawpr{frequse,erpampind}.trial{tr}+10*pinknoise(length(time));
@@ -3273,7 +3288,8 @@ if run5
           cfg.plotfiltresp='yes';
           %       cfg.fouse=[2*fsample/4 3*fsample/4 4*fsample/4]; % 3* is default
           %      cfg.fouse=[2*fsample/cfg.bpfreq(1) 3*fsample/cfg.bpfreq(1) 4*fsample/cfg.bpfreq(1)]; % 3* is default
-          cfg.fouse=[3*fsample/cfg.bpfreq(1)]; % 3* is default
+          %           cfg.fouse=[3*fsample/cfg.bpfreq(1)]; % 3* is default
+          cfg.fouse=round([1 .8 .6].*length(rawpnuse.time{1})/3);  % see ft_preproc_bandpassfilter 'fir':   if N > floor( (size(dat,2) - 1) / 3);   N=floor(size(dat,2)/3) - 1;  end
           cfg.figind=10;
           cfg.plotflag=0;
           rawpn_bpfirr=filter4phase_estim8(cfg,rawpnuse);
@@ -3403,14 +3419,25 @@ if run5
             angpnprfirwspre(:,:,tt,ff)=rms(angdiffpnprfirwspre,3);
           end
           
-          angfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100);
-          angfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100));
-          angpnfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100);
-          angpnfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100));
-          angerpfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffprfirpre(1,1,:))),3) /100);
-          angerpfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffprfirpre(1,1,:))),3) /100));
-          angpnerpfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffpnprfirpre(1,1,:))),3) /100);
-          angpnerpfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnprfirpre(1,1,:))),3) /100));
+          if 0
+            angfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100);
+            angfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100));
+            angpnfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100);
+            angpnfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100));
+            angerpfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffprfirpre(1,1,:))),3) /100);
+            angerpfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffprfirpre(1,1,:))),3) /100));
+            angpnerpfirprem(tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffpnprfirpre(1,1,:))),3) /100);
+            angpnerpfirprep(tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnprfirpre(1,1,:))),3) /100));
+          else
+            angfirprem(:,tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdifffirpre(:,1,:))),3) /100);
+            angfirprep(:,tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifffirpre(:,1,:))),3) /100));
+            angpnfirprem(:,tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffpnfirpre(:,1,:))),3) /100);
+            angpnfirprep(:,tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnfirpre(:,1,:))),3) /100));
+            angerpfirprem(:,tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffprfirpre(:,1,:))),3) /100);
+            angerpfirprep(:,tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffprfirpre(:,1,:))),3) /100));
+            angpnerpfirprem(:,tt,frequse,erpampind)=abs(sum(exp(i*deg2rad(angdiffpnprfirpre(:,1,:))),3) /100);
+            angpnerpfirprep(:,tt,frequse,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnprfirpre(:,1,:))),3) /100));
+          end
           
         end % ff
       end % erpampind
@@ -3463,15 +3490,36 @@ if run5
   
   figure(3);
   for tt=1:length(timwin),
-    subplot(2,length(timwin),tt+0*length(timwin));    bar(1-squeeze(angpnerpfirprem(tt,8:12,:))')    ;axis([-inf inf 0 0.5])
+    subplot(2,length(timwin),tt+0*length(timwin));    bar(1-squeeze(angpnerpfirprem(1,tt,8:12,:))')    ;axis([-inf inf 0 0.5])
     title(['TimWin ' num2str(timwin(tt)) ' s'])
     if tt==1,ylabel('Circ-Var');end
-    subplot(2,length(timwin),tt+1*length(timwin));    bar(1-squeeze(angpnerpfirprep(tt,8:12,:))')    ;axis([-inf inf -20 20])
+    subplot(2,length(timwin),tt+1*length(timwin));    bar(1-squeeze(angpnerpfirprep(1,tt,8:12,:))')    ;axis([-inf inf -20 20])
     if tt==1,ylabel('Mean-Angle');end
   end
   legend({'8 Hz' '9 Hz', '10 Hz', '11 Hz' '12 Hz'})
-  set(get(3,'Children'),'XTickLabel',{'ERPamp 1' 'ERPamp 2' 'ERPamp 3'})
+  %   set(get(3,'Children'),'XTickLabel',{'ERPamp 1' 'ERPamp 2' 'ERPamp 3'})
   
+  figure(4);
+  for tt=1:length(timwin),
+    subplot(2,length(timwin),tt+0*length(timwin));    bar(1-squeeze(angpnerpfirprem(2,tt,8:12,:))')    ;axis([-inf inf 0 0.5])
+    title(['TimWin ' num2str(timwin(tt)) ' s'])
+    if tt==1,ylabel('Circ-Var');end
+    subplot(2,length(timwin),tt+1*length(timwin));    bar(1-squeeze(angpnerpfirprep(2,tt,8:12,:))')    ;axis([-inf inf -20 20])
+    if tt==1,ylabel('Mean-Angle');end
+  end
+  legend({'8 Hz' '9 Hz', '10 Hz', '11 Hz' '12 Hz'})
+  %   set(get(4,'Children'),'XTickLabel',{'ERPamp 1' 'ERPamp 2' 'ERPamp 3'})
+  
+  figure(5);
+  for tt=1:length(timwin),
+    subplot(2,length(timwin),tt+0*length(timwin));    bar(1-squeeze(angpnerpfirprem(3,tt,8:12,:))')    ;axis([-inf inf 0 0.5])
+    title(['TimWin ' num2str(timwin(tt)) ' s'])
+    if tt==1,ylabel('Circ-Var');end
+    subplot(2,length(timwin),tt+1*length(timwin));    bar(1-squeeze(angpnerpfirprep(3,tt,8:12,:))')    ;axis([-inf inf -20 20])
+    if tt==1,ylabel('Mean-Angle');end
+  end
+  legend({'8 Hz' '9 Hz', '10 Hz', '11 Hz' '12 Hz'})
+  %   set(get(5,'Children'),'XTickLabel',{'ERPamp 1' 'ERPamp 2' 'ERPamp 3'})
   
   if 0
     %'Compared to trueang_prenoise')
@@ -3662,6 +3710,8 @@ if run5
     save(['D:\phase_estimation\anglermsrun5b_model' num2str(modeluse) '.mat'],'ang*mean','ang*ang','-append')
   end
   
+  load(['D:\phase_estimation\anglermsrun5b_model' num2str(modeluse) '.mat'])
+  
   for erpampind=1:3
     for tt=1:2
       figure(100+tt+(erpampind-1)*2);
@@ -3697,6 +3747,33 @@ if run5
       end
       legend({'cfg.foi 8 Hz' '9 Hz', '10 Hz', '11 Hz' '12 Hz'})
       set(get(110+tt+(erpampind-1)*2,'Children'),'xTickLabel',{'Sim 8' '9' '10' '11' '12'})
+    end
+  end
+  
+  
+  
+  for erpampind=1:3
+    for tt=1:2
+      figure(120+tt+(erpampind-1)*2);
+      for tf=1:length(t_ftimwin),
+        subplot(4,5,tf);       bar(1-squeeze(angfpemean(:,tt,tf,8:12,erpampind))')    ;axis([-inf inf 0 0.5])
+        if tf<6
+          title(['TW ' num2str(t_ftimwin{tf}(3)) ' s'])
+        else
+          title(['TW ' num2str(10*t_ftimwin{tf}(3)) ' per.'])
+        end
+        if tf==1,ylabel('Circ-Var');end
+        subplot(4,5,tf+10);    bar(squeeze(angfpeang(:,tt,tf,8:12,erpampind))')    ;axis([-inf inf -20 20])
+        if tf==1,ylabel('Mean Angle');end
+        if tf<6
+          title(['TW ' num2str(t_ftimwin{tf}(3)) ' s'])
+        else
+          title(['TW ' num2str(10*t_ftimwin{tf}(3)) ' per.'])
+        end
+      end
+      %       set(get(120+tt+(erpampind-1)*2,'Children'),'xTickLabel',{'Sim 8' '9' '10' '11' '12'})
+      set(get(120+tt+(erpampind-1)*2,'Children'),'XTickLabel',{'Sim 8' '9' '10' '11' '12'})
+      legend({'cfg.foi 8 Hz' '9 Hz', '10 Hz', '11 Hz' '12 Hz'})
     end
   end
   
@@ -4010,7 +4087,7 @@ if run6
         if 0
           trueang(tr,:) = frequse(tr)*2*pi*time+phaseshift(tr)*ones(size(time)); % random freq and phase
         else
-          trueang(:,tr,frequse,kcampind) = frequse*2*pi*time+phaseshift(tr,frequse,kcampind)*ones(size(time)); % random freq and phase
+          trueang(:,tr,frequse,kcampind) = frequse*2*pi*time+phaseshift(tr,frequse,kcampind)*ones(size(time)); % random phase
         end
         raw{frequse,kcampind}.trial{tr}=cos(trueang(:,tr,frequse,kcampind)');
         trueang_prenoise(:,tr,frequse,kcampind)=rad2deg(wrapToPi(trueang(:,tr,frequse,kcampind)));
@@ -4108,8 +4185,9 @@ if run6
           cfg.bpfilttype='fir';
           cfg.plotfiltresp='yes';
           %       cfg.fouse=[2*fsample/4 3*fsample/4 4*fsample/4]; % 3* is default
-          %       cfg.fouse=[2*fsample/cfg.bpfreq(1) 3*fsample/cfg.bpfreq(1) 4*fsample/cfg.bpfreq(1)]; % 3* is default
-          cfg.fouse=[3*fsample/cfg.bpfreq(1)]; % 3* is default
+          %           cfg.fouse=[2*fsample/cfg.bpfreq(1) 3*fsample/cfg.bpfreq(1) 4*fsample/cfg.bpfreq(1)]; % 3* is default
+          %           cfg.fouse=[3*fsample/cfg.bpfreq(1)]; % 3* is default
+          cfg.fouse=round([1 .8 .6].*length(rawpnuse.time{1})/3);  % see ft_preproc_bandpassfilter 'fir':   if N > floor( (size(dat,2) - 1) / 3);   N=floor(size(dat,2)/3) - 1;  end
           cfg.figind=10;
           cfg.plotflag=0;
           rawpn_bpfirr=filter4phase_estim8(cfg,rawpnuse);
@@ -4263,15 +4341,25 @@ if run6
             angpnerpfirwspost(:,:,tt,ff)=rms(angdiffpnerpfirwspost,3);
           end
           
-          % Note: not saving over 'ff' (but this is just alpha band anyway)
-          angfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100);
-          angfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100));
-          angpnfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100);
-          angpnfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100));
-          angerpfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdifferpfirpre(1,1,:))),3) /100);
-          angerpfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifferpfirpre(1,1,:))),3) /100));
-          angpnerpfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdiffpnerpfirpre(1,1,:))),3) /100);
-          angpnerpfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnerpfirpre(1,1,:))),3) /100));
+          %           % Note: not saving over 'ff' (but this is just alpha band anyway)
+          %           angfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100);
+          %           angfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifffirpre(1,1,:))),3) /100));
+          %           angpnfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100);
+          %           angpnfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnfirpre(1,1,:))),3) /100));
+          %           angerpfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdifferpfirpre(1,1,:))),3) /100);
+          %           angerpfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifferpfirpre(1,1,:))),3) /100));
+          %           angpnerpfirprem(tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdiffpnerpfirpre(1,1,:))),3) /100);
+          %           angpnerpfirprep(tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnerpfirpre(1,1,:))),3) /100));
+          
+          % Note: not saving over 'ff' ;  % here we are saving all FO options
+          angfirprem(:,tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdifffirpre(:,1,:))),3) /100);
+          angfirprep(:,tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifffirpre(:,1,:))),3) /100));
+          angpnfirprem(:,tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdiffpnfirpre(:,1,:))),3) /100);
+          angpnfirprep(:,tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnfirpre(:,1,:))),3) /100));
+          angerpfirprem(:,tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdifferpfirpre(:,1,:))),3) /100);
+          angerpfirprep(:,tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdifferpfirpre(:,1,:))),3) /100));
+          angpnerpfirprem(:,tt,frequse,kcampind)=abs(sum(exp(i*deg2rad(angdiffpnerpfirpre(:,1,:))),3) /100);
+          angpnerpfirprep(:,tt,frequse,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angdiffpnerpfirpre(:,1,:))),3) /100));
           
         end % ff
       end % kcampind
@@ -4289,37 +4377,74 @@ if run6
     end
   end
   
+  load(['D:\phase_estimation\anglermsrun6b.mat']);
   
-  figure(1);
+  
+  %   figure(1);
+  %   for tt=1:length(timwin),
+  %     subplot(4,length(timwin),tt);                     bar(1-squeeze(angfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
+  %     title(['Time Window length ' num2str(timwin(tt))])
+  %     if tt==1,ylabel('No PN, No Kc');end
+  %     subplot(4,length(timwin),tt+length(timwin));      bar(1-squeeze(angpnfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
+  %     if tt==1,ylabel('PN, No Kc');end
+  %     subplot(4,length(timwin),tt+2*length(timwin));    bar(1-squeeze(angerpfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
+  %     if tt==1,ylabel('No PN, Kc');end
+  %     subplot(4,length(timwin),tt+3*length(timwin));    bar(1-squeeze(angpnerpfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
+  %     if tt==1,ylabel('PN, Kc');end
+  %   end
+  %   legend({'1 Hz' '2 Hz' '3 Hz' '4 Hz', '5 Hz', '6 Hz' '7 Hz'})
+  %   set(get(1,'Children'),'xTickLabel',{'KCamp 1' 'KCamp 2' 'KCamp 3'})
+  %
+  %
+  %   figure(2);
+  %   for tt=1:length(timwin),
+  %     subplot(4,length(timwin),tt);                     bar(squeeze(angfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
+  %     title(['Time Window length ' num2str(timwin(tt))])
+  %     if tt==1,ylabel('No PN, No Kc');end
+  %     subplot(4,length(timwin),tt+length(timwin));      bar(squeeze(angpnfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
+  %     if tt==1,ylabel('PN, No Kc');end
+  %     subplot(4,length(timwin),tt+2*length(timwin));    bar(squeeze(angerpfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
+  %     if tt==1,ylabel('No PN, Kc');end
+  %     subplot(4,length(timwin),tt+3*length(timwin));    bar(squeeze(angpnerpfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
+  %     if tt==1,ylabel('PN, Kc');end
+  %   end
+  %   legend({'1 Hz' '2 Hz' '3 Hz' '4 Hz', '5 Hz', '6 Hz' '7 Hz'})
+  %   set(get(2,'Children'),'xTickLabel',{'KCamp 1' 'KCamp 2' 'KCamp 3'})
+  
+  
+  figure(3);
   for tt=1:length(timwin),
-    subplot(4,length(timwin),tt);                     bar(1-squeeze(angfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
-    title(['Time Window length ' num2str(timwin(tt))])
-    if tt==1,ylabel('No PN, No Kc');end
-    subplot(4,length(timwin),tt+length(timwin));      bar(1-squeeze(angpnfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
-    if tt==1,ylabel('PN, No Kc');end
-    subplot(4,length(timwin),tt+2*length(timwin));    bar(1-squeeze(angerpfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
-    if tt==1,ylabel('No PN, Kc');end
-    subplot(4,length(timwin),tt+3*length(timwin));    bar(1-squeeze(angpnerpfirprem(tt,:,:))')    ;axis([-inf inf 0 0.5])
-    if tt==1,ylabel('PN, Kc');end
+    subplot(2,length(timwin),tt+0*length(timwin));    bar(1-squeeze(angpnerpfirprem(1,tt,1:4,:))')    ;axis([-inf inf 0 0.5])
+    title(['TimWin ' num2str(timwin(tt)) ' s'])
+    if tt==1,ylabel('Circ-Var');end
+    subplot(2,length(timwin),tt+1*length(timwin));    bar(squeeze(angpnerpfirprep(1,tt,1:4,:))')    ;axis([-inf inf -20 20])
+    if tt==1,ylabel('Mean-Angle');end
   end
-  legend({'1 Hz' '2 Hz' '3 Hz' '4 Hz', '5 Hz', '6 Hz' '7 Hz'})
-  set(get(1,'Children'),'xTickLabel',{'KCamp 1' 'KCamp 2' 'KCamp 3'})
+  legend({'1 Hz' '2 Hz' '3 Hz' '4 Hz'})
+  %   set(get(3,'Children'),'xTickLabel',{'KCamp 1' 'KCamp 2' 'KCamp 3'})
   
-  
-  figure(2);
+  figure(4);
   for tt=1:length(timwin),
-    subplot(4,length(timwin),tt);                     bar(squeeze(angfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
-    title(['Time Window length ' num2str(timwin(tt))])
-    if tt==1,ylabel('No PN, No Kc');end
-    subplot(4,length(timwin),tt+length(timwin));      bar(squeeze(angpnfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
-    if tt==1,ylabel('PN, No Kc');end
-    subplot(4,length(timwin),tt+2*length(timwin));    bar(squeeze(angerpfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
-    if tt==1,ylabel('No PN, Kc');end
-    subplot(4,length(timwin),tt+3*length(timwin));    bar(squeeze(angpnerpfirprep(tt,:,:))')    ;axis([-inf inf -20 20])
-    if tt==1,ylabel('PN, Kc');end
+    subplot(2,length(timwin),tt+0*length(timwin));    bar(1-squeeze(angpnerpfirprem(2,tt,1:4,:))')    ;axis([-inf inf 0 0.5])
+    title(['TimWin ' num2str(timwin(tt)) ' s'])
+    if tt==1,ylabel('Circ-Var');end
+    subplot(2,length(timwin),tt+1*length(timwin));    bar(squeeze(angpnerpfirprep(2,tt,1:4,:))')    ;axis([-inf inf -20 20])
+    if tt==1,ylabel('Mean-Angle');end
   end
-  legend({'1 Hz' '2 Hz' '3 Hz' '4 Hz', '5 Hz', '6 Hz' '7 Hz'})
-  set(get(2,'Children'),'xTickLabel',{'KCamp 1' 'KCamp 2' 'KCamp 3'})
+  legend({'1 Hz' '2 Hz' '3 Hz' '4 Hz'})
+  %   set(get(4,'Children'),'xTickLabel',{'KCamp 1' 'KCamp 2' 'KCamp 3'})
+  
+  figure(5);
+  for tt=1:length(timwin),
+    subplot(2,length(timwin),tt+0*length(timwin));    bar(1-squeeze(angpnerpfirprem(3,tt,1:4,:))')    ;axis([-inf inf 0 0.5])
+    title(['TimWin ' num2str(timwin(tt)) ' s'])
+    if tt==1,ylabel('Circ-Var');end
+    subplot(2,length(timwin),tt+1*length(timwin));    bar(squeeze(angpnerpfirprep(3,tt,1:4,:))')    ;axis([-inf inf -20 20])
+    if tt==1,ylabel('Mean-Angle');end
+  end
+  legend({'1 Hz' '2 Hz' '3 Hz' '4 Hz'})
+  %   set(get(5,'Children'),'xTickLabel',{'KCamp 1' 'KCamp 2' 'KCamp 3'})
+  
   
   
   if 0
@@ -4497,6 +4622,8 @@ if run6
     save(['D:\phase_estimation\anglermsrun6b.mat'],'ang*mean','ang*ang','-append')
   end
   
+  load(['D:\phase_estimation\anglermsrun6b.mat'])
+  
   for kcampind=1:3
     for tt=1:2
       figure(100+tt+(kcampind-1)*2);
@@ -4542,6 +4669,32 @@ if run6
       set(get(110+tt+(kcampind-1)*2,'Children'),'xTickLabel',{'Sim 1' '2 Hz' '3' '4' '5' '6' '7'})
     end
   end
+  
+  for kcampind=1:3
+    for tt=1:2
+      figure(120+tt+(kcampind-1)*2);
+      for tf=1:length(t_ftimwin),
+        subplot(4,5,tf);       bar(1-squeeze(angfpemean(:,tt,tf,1:4,kcampind))')    ;axis([-inf inf 0 0.5])
+        if tf<6
+          title(['TW ' num2str(t_ftimwin{tf}(3)) ' s'])
+        else
+          title(['TW ' num2str(3*t_ftimwin{tf}(3)) ' per.'])
+        end
+        if tf==1,ylabel('Circ-Var');end
+        subplot(4,5,tf+10);    bar(squeeze(angfpeang(:,tt,tf,1:4,kcampind))')    ;axis([-inf inf -20 20])
+        if tf==1,ylabel('Mean Angle');end
+        if tf<6
+          title(['TW ' num2str(t_ftimwin{tf}(3)) ' s'])
+        else
+          title(['TW ' num2str(3*t_ftimwin{tf}(3)) ' per.'])
+        end
+      end
+      set(get(120+tt+(kcampind-1)*2,'Children'),'XTickLabel',{'Sim 1' '2 Hz' '3' '4'})
+      legend({'cfg.foi 1 Hz' '2 Hz' '3 Hz' '4 Hz'})
+    end
+  end
+  
+  
   
   
   if 0
@@ -4774,4 +4927,709 @@ if run6
   for tf=1:length(timwin),subplot(1,length(timwin),tf);bar([angwsrms(:,tf),angwesrms(:,tf),angwtrms(:,tf),angwetrms(:,tf), angwpsrms(:,tf),angwpesrms(:,tf),angwptrms(:,tf),angwpetrms(:,tf)]');axis([-inf inf 0 160]);end
   set(get(204,'Children'),'xTickLabel',{'spec', 'Kc spec', '1hz', 'Kc 1hz', 'PN spec', 'PN Kc spec', 'PN 1hz', 'PN Kc 1hz'})
   
-end
+end % end 6
+
+%% 8) Random frequency, then Hilbert
+% Create new data, with ERP just after time point of interest, with additive model
+% One raw structure with 100 trials: each at slight diff phase but same
+% random frequency within alpha band; then additive ERP (8a) or phase-reset ERP (8b)
+
+if run8
+  
+  
+  % params for whole simulation
+  clearvars -except run* time wdr fsample wav*width
+  close all;
+  numtrials=100;
+  halftimeind=round(length(time)/2);
+  plotflag=1;
+  foilim=[8 12];
+  frequse = diff(foilim)*rand(1)+foilim(1);
+  
+  cd('D:\fieldtrip_svn\utilities\private');
+  state=randomseed(13);
+  cd(wdr);
+  
+  
+  % 8a)
+  clear raw
+  erpamp=[0.5 1 2];
+  
+  
+  for erpampind=1:length(erpamp)
+    raw{erpampind}.label{1}='test';
+    raw{erpampind}.dimord='chan_time';
+    raw{erpampind}.frequse=frequse;
+    [raw{erpampind}.time{1:numtrials}]=deal(time);
+    rawpn{erpampind}=raw{erpampind};
+    rawerp{erpampind}=raw{erpampind};
+    rawpnerp{erpampind}=raw{erpampind};
+    for tr=1:numtrials % simulate 100 trials
+      % Always use 'cos' to generate signals
+      % Each trial has a base frequency, pink noise, and ERP added
+      phaseshift(erpampind,tr) = wrapToPi(2*pi*rand(1));
+      trueang(:,erpampind,tr) = frequse*2*pi*time+phaseshift(erpampind,tr)*ones(size(time)); % random freq and phase
+      raw{erpampind}.trial{tr}=cos(trueang(:,erpampind,tr))';
+      trueang_prenoise(:,erpampind,tr)=rad2deg(wrapToPi(trueang(:,erpampind,tr)));
+      rawpn{erpampind}.trial{tr}=raw{erpampind}.trial{tr}+10*pinknoise(length(time));
+      trueang_postnoise(:,erpampind,tr)=rad2deg(wrapToPi(angle(hilbert(rawpn{erpampind}.trial{tr})))); % after noise added.
+      % add sinusoid (starting at amplitude zero) from time 0-100ms, at 10.1Hz frequency
+      rawpnerp{erpampind}.trial{tr}=rawpn{erpampind}.trial{tr}+[zeros(1,halftimeind-1), erpamp(erpampind)*gausswin(301,2)'.*sin(10.1*2*pi*time(halftimeind:halftimeind+300)-10.1*2*pi*time(halftimeind)), zeros(1,halftimeind-301)];
+      rawerp{erpampind}.trial{tr}  =raw{erpampind}.trial{tr}  +[zeros(1,halftimeind-1), erpamp(erpampind)*gausswin(301,2)'.*sin(10.1*2*pi*time(halftimeind:halftimeind+300)-10.1*2*pi*time(halftimeind)), zeros(1,halftimeind-301)];
+    end
+    if plotflag
+      cfg=[];
+      tlock=ft_timelockanalysis(cfg,raw{erpampind});
+      tlockpn=ft_timelockanalysis(cfg,rawpn{erpampind});
+      tlockerp=ft_timelockanalysis(cfg,rawerp{erpampind});
+      tlockpnerp=ft_timelockanalysis(cfg,rawpnerp{erpampind});
+      figure;plot(tlock.time,tlock.avg)
+      hold on;plot(tlockpn.time,tlockpn.avg,'g');axis([-inf inf -2 2])
+      hold on;plot(tlockerp.time,tlockerp.avg,'r');axis([-inf inf -2 2])
+      hold on;plot(tlockerp.time,tlockpnerp.avg,'k');axis([-inf inf -2 2])
+    end
+  end
+  
+  
+  % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  % 8a) Bandpass filter + Hilbert
+  
+  close all
+  
+  % Filter prestim and assess peak frequency with Hilbert
+  
+  
+  
+  
+  for erpampind=1:length(erpamp)
+    
+    cfg=[];
+    cfg.latency=[time(1) time(halftimeind)];
+    rawpnerpuse=ft_selectdata(cfg,rawpnerp{erpampind});
+    halftimeinduse=dsearchn(rawpnerpuse.time{1}',time(halftimeind));
+    
+    cfg=[];
+    cfg.bpfilter='yes';
+    cfg.bpfreq=[7 13];
+    cfg.bpfilttype='fir';
+    cfg.plotfiltresp='yes';
+    cfg.fouse=round([3*fsample/cfg.bpfreq(1)]); % 3* is default
+    cfg.figind=10;
+    cfg.plotflag=0;
+    cfg.hilbert='complex';
+    rawpnerp_bpfir=filter4phase_estim8(cfg,rawpnerpuse);
+    for tr=1:numtrials
+      diffang=diff(angle(rawpnerp_bpfir{2}.trial{tr}));  % For this, we trust two-pass more than one-pass zerophase.
+      diffang(diffang<-6)=nan;
+      mediandiffang(tr)=nanmedian(diffang);
+    end
+    freqest(erpampind)=mean(mediandiffang)/(.001*2*pi);
+    
+    
+    % The peak frequency found is biased toward centre of bandpass range.
+    % Thus, run again now centred on peak found.  Typically it adjusts
+    % slightly in the right direction (in ideal case of perfect sinusoid)
+    cfg.bpfreq=[freqest(erpampind)-2 freqest(erpampind)+2];
+    rawpnerp_bpfir=filter4phase_estim8(cfg,rawpnerpuse);
+    for tr=1:numtrials
+      diffang=diff(angle(rawpnerp_bpfir{2}.trial{tr}));  % For this, we trust two-pass more than one-pass zerophase.
+      diffang(diffang<-6)=nan;
+      mediandiffang(tr)=nanmedian(diffang);
+    end
+    freqest2(erpampind)=mean(mediandiffang)/(.001*2*pi);
+    
+  end
+  
+  % 8a) FFT + taper
+  
+  timwin=[4 2 1 .5 .25]; % duration in seconds; must be ordered from longest to shortest
+  
+  cfg=[];
+  cfg.method='mtmconvol';
+  cfg.output='fourier';
+  cfg.taper='hanning';
+  cfg.keeptrials='yes';
+  cfg.foi=mean(freqest2);
+  
+  
+  
+  t_ftimwin{1}=timwin(1)*ones(size(cfg.foi)); % full length of data
+  t_ftimwin{2}=timwin(2)*ones(size(cfg.foi)); % to match Hilbert calculations  % 2 periods 4 Hz
+  t_ftimwin{3}=timwin(3)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{4}=timwin(4)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{5}=timwin(5)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{6}=4./cfg.foi; %
+  t_ftimwin{7}=3./cfg.foi; %
+  t_ftimwin{8}=2./cfg.foi; % two periods for each frequency
+  t_ftimwin{9}=1./cfg.foi; % one period for each frequency
+  t_ftimwin{10}=0.5./cfg.foi; %
+  
+  % first, centre on time of interest
+  toi{1}=time(halftimeind);
+  % second, centre half period before time of interest and add pi
+  toi{2}=time(halftimeind)-0.5./cfg.foi;
+  
+  angfreq=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqerp=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqpn=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqpnerp=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  
+  for erpampind=1:length(erpamp)
+    for ss=1:numtrials
+      cfg.trials=ss;
+      for tt=1:length(toi)
+        cfg.toi=toi{tt};
+        for tf=1:length(t_ftimwin)
+          cfg.t_ftimwin=t_ftimwin{tf};
+          freq  =ft_freqanalysis(cfg, raw{erpampind});
+          freqerp=ft_freqanalysis(cfg, rawerp{erpampind});
+          freqpn  =ft_freqanalysis(cfg, rawpn{erpampind});
+          freqpnerp=ft_freqanalysis(cfg, rawpnerp{erpampind});
+          if tt==1
+            %           angfreq(:,:,tt,pp,tf)=angle(squeeze(freq{tt,pp,tf}.fourierspctrm))/(2*pi)*360;
+            angfreq(ss,:,tt,tf)   =rad2deg(wrapToPi(angle(squeeze(freq.fourierspctrm))));
+            angfreqerp(ss,:,tt,tf)=rad2deg(wrapToPi(angle(squeeze(freqerp.fourierspctrm))));
+            angfreqpn(ss,:,tt,tf)   =rad2deg(wrapToPi(angle(squeeze(freqpn.fourierspctrm))));
+            angfreqpnerp(ss,:,tt,tf)=rad2deg(wrapToPi(angle(squeeze(freqpnerp.fourierspctrm))));
+          elseif tt==2
+            angfreq(ss,:,tt,tf)   =rad2deg(diag(wrapToPi(angle(squeeze(freq.fourierspctrm(1,1,:,:)))+pi  )));
+            angfreqerp(ss,:,tt,tf)=rad2deg(diag(wrapToPi(angle(squeeze(freqerp.fourierspctrm(1,1,:,:)))+pi  )));
+            angfreqpn(ss,:,tt,tf)   =rad2deg(diag(wrapToPi(angle(squeeze(freqpn.fourierspctrm(1,1,:,:)))+pi  )));
+            angfreqpnerp(ss,:,tt,tf)=rad2deg(diag(wrapToPi(angle(squeeze(freqpnerp.fourierspctrm(1,1,:,:)))+pi  )));
+          end
+        end % tf
+      end % tt
+      
+      % compute differences
+      angfreqdiff(ss,:,:,:)       =anglediff(angfreq(ss,:,:,:),       trueang_prenoise(halftimeind,erpampind,ss),1);
+      angfreqerpdiff(ss,:,:,:)    =anglediff(angfreqerp(ss,:,:,:),    trueang_prenoise(halftimeind,erpampind,ss),1);
+      angfreqpndiff(ss,:,:,:)       =anglediff(angfreqpn(ss,:,:,:),       trueang_prenoise(halftimeind,erpampind,ss),1);
+      angfreqpnerpdiff(ss,:,:,:)    =anglediff(angfreqpnerp(ss,:,:,:),    trueang_prenoise(halftimeind,erpampind,ss),1);
+      
+    end % ss
+    
+    angfmean(:,:,:,erpampind)=  abs(sum(exp(i*deg2rad(angfreqdiff)),1)/numtrials);
+    angfemean(:,:,:,erpampind)=abs(sum(exp(i*deg2rad(angfreqerpdiff)),1)/numtrials);
+    angfpmean(:,:,:,erpampind)=abs(sum(exp(i*deg2rad(angfreqpndiff)),1)/numtrials);
+    angfpemean(:,:,:,erpampind)=abs(sum(exp(i*deg2rad(angfreqpnerpdiff)),1)/numtrials);
+    angfang(:,:,:,erpampind)=  rad2deg(angle(sum(exp(i*deg2rad(angfreqdiff)),1)/numtrials));
+    angfeang(:,:,:,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqerpdiff)),1)/numtrials));
+    angfpang(:,:,:,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqpndiff)),1)/numtrials));
+    angfpeang(:,:,:,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqpnerpdiff)),1)/numtrials));
+    
+  end % erpampind
+  
+  try
+    save(['D:\phase_estimation\anglermsrun8a.mat'],'ang*mean','ang*ang','freqest2','frequse','-append')
+  catch
+    save(['D:\phase_estimation\anglermsrun8a.mat'],'ang*mean','ang*ang','freqest2','frequse')
+  end
+  
+  load(['D:\phase_estimation\anglermsrun8a.mat'])
+  
+  
+  for tt=1:2
+    figure(120+tt);
+    for tf=1:length(t_ftimwin),
+      subplot(4,5,tf);       bar(1-squeeze(angfpemean(:,tt,tf,:))')    ;axis([-inf inf 0 0.5])
+      if tf<6
+        title(['TW ' num2str(t_ftimwin{tf}) ' s'])
+      else
+        title(['TW ' num2str(t_ftimwin{tf}*cfg.foi) ' per.'])
+      end
+      if tf==1,ylabel('Circ-Var');end
+      subplot(4,5,tf+10);    bar(squeeze(angfpeang(:,tt,tf,:))')    ;axis([-inf inf -20 20])
+      if tf==1,ylabel('Mean Angle');end
+      if tf<6
+        title(['TW ' num2str(t_ftimwin{tf}) ' s'])
+      else
+        title(['TW ' num2str(t_ftimwin{tf}*cfg.foi) ' per.'])
+      end
+    end
+    %       set(get(120+tt+(erpampind-1)*2,'Children'),'xTickLabel',{'Sim 8' '9' '10' '11' '12'})
+    set(get(120+tt,'Children'),'XTickLabel',{'ERPamp1' 'ERPamp2' 'ERPamp3'})
+    %legend({'cfg.foi 8 Hz' '9 Hz', '10 Hz', '11 Hz' '12 Hz'})
+  end
+  
+  %% 8b
+  % inspired by
+  % phasereset (frames, epochs, srate, minfr, maxfr, position, tjitter)
+  % from % Implemented by: Rafal Bogacz and Nick Yeung, September 2006
+  
+  clearvars -except run* time wdr fsample wav*width
+  addpath('D:\phase_estimation\phasereset_modelling')
+  halftimeind=round(length(time)/2);
+  numtrials=100;
+  foilim=[8 12];
+  frequse = diff(foilim)*rand(1)+foilim(1);
+  
+  numones=[1 4 7];
+  resetwin=[40 20 0];
+  
+  % Model 1:  frequency shift to meet phase at later time; return to new frequency
+  % Model 12: Same effectively as 1, except modelled as linear phase procession (at new frequency not determinted explicitly); return to new frequency
+  % Model 2:  frequency shift to meet phase at later time; return to original frequency
+  % Model 22: Same effectively as 2, except modelled as linear phase procession (at new frequency not determinted explicitly); return to original frequency
+  % Model 3:  short time to meet new phase via line;
+  % Model 4:  short time to meet new phase via line; new phase determined by 'phase-response-curve'
+  modeluse=12;
+  
+  for erpampind=1:length(resetwin)
+    cd('D:\fieldtrip_svn\utilities\private');
+    state=randomseed(13);
+    cd(wdr);
+    
+    % control with no phase reset
+    raw{erpampind}.label{1}='test';
+    raw{erpampind}.dimord='chan_time';
+    [raw{erpampind}.time{1:numtrials}]=deal(time);
+    rawpn{erpampind}=raw{erpampind};
+    rawpr{erpampind}=raw{erpampind};
+    rawpnpr{erpampind}=raw{erpampind};
+    for tr=1:numtrials
+      switch modeluse
+        case 1
+          [raw{erpampind}.trial{tr}] = phasereset_jz (time, fsample, frequse, foilim(1), foilim(2), length(time)-1, length(time), 1);
+        case 12
+          [raw{erpampind}.trial{tr}] = phasereset_jz_linphase_postjitter (time, frequse, length(time)-1, length(time), 0 );
+        case 3
+          %       [raw{erpampind}.trial{tr}] = phasereset_jz_jump (time, frequse, length(time)-1, length(time), numones(erpampind) );
+          [raw{erpampind}.trial{tr}] = phasereset_jz_jump (time, frequse, length(time)-1, length(time), 0 );
+        case 2
+          [raw{erpampind}.trial{tr}] = phasereset_jz_steadybasefreq (time, fsample, frequse, foilim(1), foilim(2), length(time)-1, length(time), 1);
+        case 22
+          [raw{erpampind}.trial{tr}] = phasereset_jz_linphase (time, frequse, length(time)-1, length(time), 0 );
+        case 4 % phase response curve
+          [raw{erpampind}.trial{tr}] = phasereset_jz_jump_prc (time, frequse, length(time)-1, length(time), 0 );
+      end
+      rawpn{erpampind}.trial{tr}=raw{erpampind}.trial{tr}+10*pinknoise(length(time));
+    end
+    
+    % set back again to exact same state, thus same phase at time points until phase reset
+    cd('D:\fieldtrip_svn\utilities\private');
+    state=randomseed(13);
+    cd(wdr);
+    
+    % do proper reset at halfway point
+    for tr=1:numtrials
+      switch modeluse
+        case 1
+          [rawpr{erpampind}.trial{tr},trueang_prenoise(tr,erpampind),newfreq(tr,erpampind)] = phasereset_jz (time, fsample, frequse, foilim(1), foilim(2), halftimeind, halftimeind+.1*fsample, numones(erpampind));
+        case 12
+          [rawpr{erpampind}.trial{tr},trueang_prenoise(tr,erpampind),resetang(tr,erpampind)] = phasereset_jz_linphase_postjitter (time, frequse, halftimeind, halftimeind+20, resetwin(erpampind) );
+        case 3
+          %       [rawpr{erpampind}.trial{tr},trueang_prenoise(tr,erpampind)] = phasereset_jz_jump (time, frequse, halftimeind, halftimeind+20, numones(erpampind) );
+          [rawpr{erpampind}.trial{tr},trueang_prenoise(tr,erpampind),resetang(tr,erpampind)] = phasereset_jz_jump (time, frequse, halftimeind, halftimeind+20, resetwin(erpampind) );
+        case 2
+          [rawpr{erpampind}.trial{tr},trueang_prenoise(tr,erpampind)] = phasereset_jz_steadybasefreq (time, fsample, frequse, foilim(1), foilim(2), halftimeind, halftimeind+.1*fsample, numones(erpampind));
+        case 22
+          [rawpr{erpampind}.trial{tr},trueang_prenoise(tr,erpampind),resetang(tr,erpampind)] = phasereset_jz_linphase (time, frequse, halftimeind, halftimeind+20, resetwin(erpampind) );
+        case 4
+      end
+      rawpnpr{erpampind}.trial{tr}=rawpr{erpampind}.trial{tr}+10*pinknoise(length(time));
+    end
+    
+    prc(:,erpampind)=resetang(:,erpampind)-trueang_prenoise(:,erpampind);
+    trueang_prenoise(:,erpampind)=rad2deg(wrapToPi(trueang_prenoise(:,erpampind)));
+    
+    cfg=[];
+    tlock=ft_timelockanalysis(cfg,raw{erpampind});
+    tlockpr=ft_timelockanalysis(cfg,rawpr{erpampind});
+    tlockpn=ft_timelockanalysis(cfg,rawpn{erpampind});
+    tlockpnpr=ft_timelockanalysis(cfg,rawpnpr{erpampind});
+    
+    if 1
+      figure;plot(time,[tlock.avg; tlockpr.avg; tlockpn.avg; tlockpnpr.avg]);axis([-inf inf -1 1])
+    end
+    
+  end % erpampind
+  
+  
+  cfg=[];
+  for erpampind=1:3
+    tlockpnpr=ft_timelockanalysis(cfg,rawpnpr{erpampind});
+    figure;plot(time,[tlockpnpr.avg]);axis([-inf inf -1 1])
+  end
+  
+  
+  startang=resetang-prc;
+  
+  
+  % 8b) bandpass and Hilbert to find peak frequency
+  for erpampind=1:length(resetwin)
+    
+    cfg=[];
+    cfg.latency=[time(1) time(halftimeind)];
+    rawpnerpuse=ft_selectdata(cfg,rawpnpr{erpampind});
+    halftimeinduse=dsearchn(rawpnerpuse.time{1}',time(halftimeind));
+    
+    cfg=[];
+    cfg.bpfilter='yes';
+    cfg.bpfreq=[7 13];
+    cfg.bpfilttype='fir';
+    cfg.plotfiltresp='yes';
+    cfg.fouse=round([3*fsample/cfg.bpfreq(1)]); % 3* is default
+    cfg.figind=10;
+    cfg.plotflag=0;
+    cfg.hilbert='complex';
+    rawpnerp_bpfir=filter4phase_estim8(cfg,rawpnerpuse);
+    for tr=1:numtrials
+      diffang=diff(angle(rawpnerp_bpfir{2}.trial{tr}));  % For this, we trust two-pass more than one-pass zerophase.
+      diffang(diffang<-6)=nan;
+      mediandiffang(tr)=nanmedian(diffang);
+    end
+    freqest(erpampind)=mean(mediandiffang)/(.001*2*pi);
+    
+    
+    % The peak frequency found is biased toward centre of bandpass range.
+    % Thus, run again now centred on peak found.  Typically it adjusts
+    % slightly in the right direction (in ideal case of perfect sinusoid)
+    cfg.bpfreq=[freqest(erpampind)-2 freqest(erpampind)+2];
+    rawpnerp_bpfir=filter4phase_estim8(cfg,rawpnerpuse);
+    for tr=1:numtrials
+      diffang=diff(angle(rawpnerp_bpfir{2}.trial{tr}));  % For this, we trust two-pass more than one-pass zerophase.
+      diffang(diffang<-6)=nan;
+      mediandiffang(tr)=nanmedian(diffang);
+    end
+    freqest2(erpampind)=mean(mediandiffang)/(.001*2*pi);
+    
+  end
+  
+  % 8b) FFT at freqest
+  
+  timwin=[4 2 1 .5 .25]; % duration in seconds; must be ordered from longest to shortest
+  cfg=[];
+  cfg.method='mtmconvol';
+  cfg.output='fourier';
+  cfg.taper='hanning';
+  cfg.keeptrials='yes';
+  cfg.foi=mean(freqest2);
+  
+  
+  t_ftimwin{1}=timwin(1)*ones(size(cfg.foi)); % full length of data
+  t_ftimwin{2}=timwin(2)*ones(size(cfg.foi)); % to match Hilbert calculations  % 2 periods 4 Hz
+  t_ftimwin{3}=timwin(3)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{4}=timwin(4)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{5}=timwin(5)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{6}=4./cfg.foi; %
+  t_ftimwin{7}=3./cfg.foi; %
+  t_ftimwin{8}=2./cfg.foi; % two periods for each frequency
+  t_ftimwin{9}=1./cfg.foi; % one period for each frequency
+  t_ftimwin{10}=0.5./cfg.foi; %
+  
+  % first, centre on time of interest
+  toi{1}=time(halftimeind);
+  % second, centre half period before time of interest and add pi
+  toi{2}=time(halftimeind)-0.5./cfg.foi;
+  
+  angfreq=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqpr=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqpn=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqpnpr=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  
+  for erpampind=1:length(resetwin)
+    for ss=1:numtrials
+      cfg.trials=ss;
+      for tt=1:length(toi)
+        cfg.toi=toi{tt};
+        for tf=1:length(t_ftimwin)
+          cfg.t_ftimwin=t_ftimwin{tf};
+          freq  =ft_freqanalysis(cfg, raw{erpampind});
+          freqpr=ft_freqanalysis(cfg, rawpr{erpampind});
+          freqpn  =ft_freqanalysis(cfg, rawpn{erpampind});
+          freqpnpr=ft_freqanalysis(cfg, rawpnpr{erpampind});
+          if tt==1
+            %           angfreq(:,:,tt,pp,tf)=angle(squeeze(freq{tt,pp,tf}.fourierspctrm))/(2*pi)*360;
+            angfreq(ss,:,tt,tf)   =rad2deg(wrapToPi(angle(squeeze(freq.fourierspctrm))));
+            angfreqpr(ss,:,tt,tf)=rad2deg(wrapToPi(angle(squeeze(freqpr.fourierspctrm))));
+            angfreqpn(ss,:,tt,tf)   =rad2deg(wrapToPi(angle(squeeze(freqpn.fourierspctrm))));
+            angfreqpnpr(ss,:,tt,tf)=rad2deg(wrapToPi(angle(squeeze(freqpnpr.fourierspctrm))));
+          elseif tt==2
+            angfreq(ss,:,tt,tf)   =rad2deg(diag(wrapToPi(angle(squeeze(freq.fourierspctrm(1,1,:,:)))+pi  )));
+            angfreqpr(ss,:,tt,tf)=rad2deg(diag(wrapToPi(angle(squeeze(freqpr.fourierspctrm(1,1,:,:)))+pi  )));
+            angfreqpn(ss,:,tt,tf)   =rad2deg(diag(wrapToPi(angle(squeeze(freqpn.fourierspctrm(1,1,:,:)))+pi  )));
+            angfreqpnpr(ss,:,tt,tf)=rad2deg(diag(wrapToPi(angle(squeeze(freqpnpr.fourierspctrm(1,1,:,:)))+pi  )));
+          end
+        end % tf
+      end % tt
+      
+      % compute differences
+      angfreqdiff(ss,:,:,:)       =anglediff(angfreq(ss,:,:,:),       trueang_prenoise(ss,erpampind),1);
+      angfreqprdiff(ss,:,:,:)    =anglediff(angfreqpr(ss,:,:,:),    trueang_prenoise(ss,erpampind),1);
+      angfreqpndiff(ss,:,:,:)       =anglediff(angfreqpn(ss,:,:,:),       trueang_prenoise(ss,erpampind),1);
+      angfreqpnprdiff(ss,:,:,:)    =anglediff(angfreqpnpr(ss,:,:,:),    trueang_prenoise(ss,erpampind),1);
+      
+      
+    end
+    
+    angfmean(:,:,:,erpampind)=  abs(sum(exp(i*deg2rad(angfreqdiff)),1)/numtrials);
+    angfemean(:,:,:,erpampind)=abs(sum(exp(i*deg2rad(angfreqprdiff)),1)/numtrials);
+    angfpmean(:,:,:,erpampind)=abs(sum(exp(i*deg2rad(angfreqpndiff)),1)/numtrials);
+    angfpemean(:,:,:,erpampind)=abs(sum(exp(i*deg2rad(angfreqpnprdiff)),1)/numtrials);
+    angfang(:,:,:,erpampind)=  rad2deg(angle(sum(exp(i*deg2rad(angfreqdiff)),1)/numtrials));
+    angfeang(:,:,:,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqprdiff)),1)/numtrials));
+    angfpang(:,:,:,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqpndiff)),1)/numtrials));
+    angfpeang(:,:,:,erpampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqpnprdiff)),1)/numtrials));
+    
+  end % erpampind
+  
+  try
+    save(['D:\phase_estimation\anglermsrun8b_model' num2str(modeluse) '.mat'],'ang*mean','ang*ang','freqest2','frequse','-append')
+  catch
+    save(['D:\phase_estimation\anglermsrun8b_model' num2str(modeluse) '.mat'],'ang*mean','ang*ang','freqest2','frequse')
+  end
+  
+  load(['D:\phase_estimation\anglermsrun8b_model' num2str(modeluse) '.mat'])
+  
+  
+  for tt=1:2
+    figure(130+tt);
+    for tf=1:length(t_ftimwin),
+      subplot(4,5,tf);       bar(1-squeeze(angfpemean(1,tt,tf,:))')    ;axis([-inf inf 0 0.5])
+      if tf<6
+        title(['TW ' num2str(t_ftimwin{tf}) ' s'])
+      else
+        title(['TW ' num2str(t_ftimwin{tf}*cfg.foi) ' per.'])
+      end
+      if tf==1,ylabel('Circ-Var');end
+      subplot(4,5,tf+10);    bar(squeeze(angfpeang(1,tt,tf,:))')    ;axis([-inf inf -20 20])
+      if tf==1,ylabel('Mean Angle');end
+      if tf<6
+        title(['TW ' num2str(t_ftimwin{tf}) ' s'])
+      else
+        title(['TW ' num2str(t_ftimwin{tf}*cfg.foi) ' per.'])
+      end
+    end
+    %       set(get(120+tt+(erpampind-1)*2,'Children'),'xTickLabel',{'Sim 8' '9' '10' '11' '12'})
+    set(get(130+tt,'Children'),'XTickLabel',{'ERP PR1' 'ERP PR2' 'ERP PR3'})
+    %     legend({'cfg.foi 8 Hz' '9 Hz', '10 Hz', '11 Hz' '12 Hz'})
+  end
+  
+  
+  
+  
+end % end 8
+
+
+
+%% 9) Create new data, with Kc evoked at time point of interest, with additive model
+% nearly same as (6)
+
+if run9
+  
+  % params for whole simulation
+  clearvars -except run* time wdr fsample wav*width
+  close all;
+  cd('D:\fieldtrip_svn\utilities\private');
+  state=randomseed(13);
+  cd(wdr);
+  
+  clear raw
+  numtrials=100;
+  halftimeind=round(length(time)/2);
+  kcamp=[3 6 9];
+  
+  foilim=[1 4];
+  frequse = diff(foilim)*rand(1)+foilim(1);
+  
+  for kcampind=1:length(kcamp)
+    raw{kcampind}.label{1}='test';
+    raw{kcampind}.dimord='chan_time';
+    [raw{kcampind}.time{1:numtrials}]=deal(time);
+    rawpn{kcampind}=raw{kcampind};
+    rawerp{kcampind}=raw{kcampind};
+    rawpnerp{kcampind}=raw{kcampind};
+    
+    for tr=1:numtrials % simulate 100 trials
+      % Always use 'cos' to generate signals
+      % Each trial has a base frequency, pink noise, and ERP added
+      phaseshift(tr,kcampind) = wrapToPi(2*pi*rand(1));
+      trueang(:,tr,kcampind) = frequse*2*pi*time+phaseshift(tr,kcampind)*ones(size(time)); % random phase
+      raw{kcampind}.trial{tr}=cos(trueang(:,tr,kcampind)');
+      trueang_prenoise(:,tr,kcampind)=rad2deg(wrapToPi(trueang(:,tr,kcampind)));
+      rawpn{kcampind}.trial{tr}=raw{kcampind}.trial{tr}+10*pinknoise(length(time));
+      trueang_postnoise(:,tr,kcampind)=rad2deg(wrapToPi(angle(hilbert(rawpn{kcampind}.trial{tr})))); % after noise added.
+      % add sinusoid (starting at amplitude zero) from time 0-100ms, at 1.25Hz frequency
+      rawpnerp{kcampind}.trial{tr}=rawpn{kcampind}.trial{tr}+[zeros(1,halftimeind-1), kcamp(kcampind)*gausswin(801,1)'.*sin(1.25*2*pi*time(halftimeind:halftimeind+800)-1.25*2*pi*time(halftimeind)), zeros(1,halftimeind-801)];
+      rawerp{kcampind}.trial{tr}  =raw{kcampind}.trial{tr}  +[zeros(1,halftimeind-1), kcamp(kcampind)*gausswin(801,1)'.*sin(1.25*2*pi*time(halftimeind:halftimeind+800)-1.25*2*pi*time(halftimeind)), zeros(1,halftimeind-801)];
+    end
+    cfg=[];
+    tlock=ft_timelockanalysis(cfg,raw{kcampind});
+    tlockpn=ft_timelockanalysis(cfg,rawpn{kcampind});
+    tlockerp=ft_timelockanalysis(cfg,rawerp{kcampind});
+    tlockpnerp=ft_timelockanalysis(cfg,rawpnerp{kcampind});
+    
+    
+    if 1
+      figure;plot(tlock.time,raw{kcampind}.trial{1})
+      hold on;plot(tlockpn.time,rawpn{kcampind}.trial{1},'g');axis([-inf inf -10 10])
+      hold on;plot(tlockerp.time,rawerp{kcampind}.trial{1},'r');axis([-inf inf -10 10])
+      hold on;plot(tlockerp.time,rawpnerp{kcampind}.trial{1},'k');axis([-inf inf -10 10])
+    end
+  end
+  
+  % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  % 9) Bandpass filter + Hilbert
+  
+  close all
+  
+  timwin=[4 2 1 .5]; % duration in seconds; must be ordered from longest to shortest
+  
+  for kcampind=1:length(kcamp)
+    
+    cfg=[];
+    cfg.latency=[time(1) time(halftimeind)];
+    rawpnerpuse=ft_selectdata(cfg,rawpnerp{kcampind});
+    
+    
+    % Bandpass filter: FIR (Matlab 'fir1')
+    rawpn_bpfir{3,2}=[];
+    raw_bpfir{3,2}=[];
+    rawerp_bpfir{3,2}=[];
+    rawpnerp_bpfir{3,2}=[];
+    cfg=[];
+    cfg.bpfilter='yes';
+    cfg.bpfreq=[0.5 5];
+    cfg.bpfilttype='fir';
+    cfg.plotfiltresp='yes';
+    cfg.fouse=[3*fsample/cfg.bpfreq(1)]; % 3* is default
+    cfg.figind=10;
+    cfg.plotflag=0;
+    cfg.hilbert='complex';
+    rawpnerp_bpfir=filter4phase_estim8(cfg,rawpnerpuse);
+    
+    
+    for tr=1:numtrials
+      diffang=diff(angle(rawpnerp_bpfir{2}.trial{tr}));  % For this, we trust two-pass more than one-pass zerophase.
+      diffang(diffang<-6)=nan;
+      mediandiffang(tr)=nanmedian(diffang);
+    end
+    freqest(kcampind)=mean(mediandiffang)/(.001*2*pi);
+    
+    
+    % The peak frequency found is biased toward centre of bandpass range.
+    % Thus, run again now centred on peak found.  Typically it adjusts
+    % slightly in the right direction (in ideal case of perfect sinusoid)
+    cfg.bpfreq=[freqest(kcampind)-2 freqest(kcampind)+2];
+    if cfg.bpfreq(1)<0.3, cfg.bpfreq(1)=0.3; end
+    rawpnerp_bpfir=filter4phase_estim8(cfg,rawpnerpuse);
+    for tr=1:numtrials
+      diffang=diff(angle(rawpnerp_bpfir{2}.trial{tr}));  % For this, we trust two-pass more than one-pass zerophase.
+      diffang(diffang<-6)=nan;
+      mediandiffang(tr)=nanmedian(diffang);
+    end
+    freqest2(kcampind)=mean(mediandiffang)/(.001*2*pi);
+    
+    
+  end % kcampind
+  clear angdiff*
+  
+  
+  % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  % 9) FFT + taper
+  
+  cfg=[];
+  cfg.method='mtmconvol';
+  cfg.output='fourier';
+  cfg.taper='hanning';
+  cfg.foi=mean(freqest2);
+  cfg.keeptrials='yes';
+  
+  t_ftimwin{1}=timwin(1)*ones(size(cfg.foi)); % full length of data
+  t_ftimwin{2}=timwin(2)*ones(size(cfg.foi)); % to match Hilbert calculations  % 2 periods 4 Hz
+  t_ftimwin{3}=timwin(3)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{4}=timwin(4)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  %   t_ftimwin{5}=timwin(5)*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{5}=nan*ones(size(cfg.foi)); % to match Hilbert calculations % 1 period 4 Hz
+  t_ftimwin{6}=4./cfg.foi; %
+  t_ftimwin{7}=3./cfg.foi; %
+  t_ftimwin{8}=2./cfg.foi; % two periods for each frequency
+  t_ftimwin{9}=1./cfg.foi; % one period for each frequency
+  t_ftimwin{10}=0.5./cfg.foi; %
+  
+  % first, centre on time of interest
+  toi{1}=time(halftimeind);
+  % second, centre half period before time of interest and add pi
+  toi{2}=time(halftimeind)-0.5./cfg.foi;
+  
+  angfreq=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqerp=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqpn=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  angfreqpnerp=nan(numtrials,length(cfg.foi),length(toi),length(t_ftimwin));
+  
+    for kcampind=1:length(kcamp)
+      for ss=1:numtrials
+        cfg.trials=ss;
+        for tt=1:length(toi)
+          cfg.toi=toi{tt};
+          for tf=setdiff(1:length(t_ftimwin),5)
+            cfg.t_ftimwin=t_ftimwin{tf};
+            freq  =ft_freqanalysis(cfg, raw{kcampind});
+            freqerp=ft_freqanalysis(cfg, rawerp{kcampind});
+            freqpn  =ft_freqanalysis(cfg, rawpn{kcampind});
+            freqpnerp=ft_freqanalysis(cfg, rawpnerp{kcampind});
+            if tt==1
+              %           angfreq(:,:,tt,pp,tf)=angle(squeeze(freq{tt,pp,tf}.fourierspctrm))/(2*pi)*360;
+              angfreq(ss,:,tt,tf)   =rad2deg(wrapToPi(angle(squeeze(freq.fourierspctrm))));
+              angfreqerp(ss,:,tt,tf)=rad2deg(wrapToPi(angle(squeeze(freqerp.fourierspctrm))));
+              angfreqpn(ss,:,tt,tf)   =rad2deg(wrapToPi(angle(squeeze(freqpn.fourierspctrm))));
+              angfreqpnerp(ss,:,tt,tf)=rad2deg(wrapToPi(angle(squeeze(freqpnerp.fourierspctrm))));
+            elseif tt==2
+              angfreq(ss,:,tt,tf)   =rad2deg(diag(wrapToPi(angle(squeeze(freq.fourierspctrm(1,1,:,:)))+pi  )));
+              angfreqerp(ss,:,tt,tf)=rad2deg(diag(wrapToPi(angle(squeeze(freqerp.fourierspctrm(1,1,:,:)))+pi  )));
+              angfreqpn(ss,:,tt,tf)   =rad2deg(diag(wrapToPi(angle(squeeze(freqpn.fourierspctrm(1,1,:,:)))+pi  )));
+              angfreqpnerp(ss,:,tt,tf)=rad2deg(diag(wrapToPi(angle(squeeze(freqpnerp.fourierspctrm(1,1,:,:)))+pi  )));
+            end
+          end % tf
+        end % tt
+
+        % compute differences
+        angfreqdiff(ss,:,:,:)       =anglediff(angfreq(ss,:,:,:),       trueang_prenoise(halftimeind,ss,kcampind),1);
+        angfreqerpdiff(ss,:,:,:)    =anglediff(angfreqerp(ss,:,:,:),    trueang_prenoise(halftimeind,ss,kcampind),1);
+        angfreqpndiff(ss,:,:,:)       =anglediff(angfreqpn(ss,:,:,:),       trueang_prenoise(halftimeind,ss,kcampind),1);
+        angfreqpnerpdiff(ss,:,:,:)    =anglediff(angfreqpnerp(ss,:,:,:),    trueang_prenoise(halftimeind,ss,kcampind),1);
+        
+      end
+      
+      angfmean(:,:,:,kcampind)=  abs(sum(exp(i*deg2rad(angfreqdiff)),1)/numtrials);
+      angfemean(:,:,:,kcampind)=abs(sum(exp(i*deg2rad(angfreqerpdiff)),1)/numtrials);
+      angfpmean(:,:,:,kcampind)=abs(sum(exp(i*deg2rad(angfreqpndiff)),1)/numtrials);
+      angfpemean(:,:,:,kcampind)=abs(sum(exp(i*deg2rad(angfreqpnerpdiff)),1)/numtrials);
+      angfang(:,:,:,kcampind)=  rad2deg(angle(sum(exp(i*deg2rad(angfreqdiff)),1)/numtrials));
+      angfeang(:,:,:,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqerpdiff)),1)/numtrials));
+      angfpang(:,:,:,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqpndiff)),1)/numtrials));
+      angfpeang(:,:,:,kcampind)=rad2deg(angle(sum(exp(i*deg2rad(angfreqpnerpdiff)),1)/numtrials));
+      
+    end % kcampind
+    
+    try
+      save(['D:\phase_estimation\anglermsrun9.mat'],'ang*mean','ang*ang','frequse','freqest2','-append')
+    catch
+      save(['D:\phase_estimation\anglermsrun9.mat'],'ang*mean','ang*ang','frequse','freqest2')
+    end
+    
+    load(['D:\phase_estimation\anglermsrun9.mat'])
+    
+    for tt=1:2
+      figure(140+tt);
+      for tf=1:length(t_ftimwin),
+        subplot(4,5,tf);       bar(1-squeeze(angfpemean(:,tt,tf,:))')    ;axis([-inf inf 0 0.5])
+        if tf<6
+          title(['TW ' num2str(t_ftimwin{tf}) ' s'])
+        else
+          title(['TW ' num2str(t_ftimwin{tf}*cfg.foi) ' per.'])
+        end
+        if tf==1,ylabel('Circ-Var');end
+        subplot(4,5,tf+10);    bar(squeeze(angfpeang(:,tt,tf,:))')    ;axis([-inf inf -20 20])
+        if tf==1,ylabel('Mean Angle');end
+        if tf<6
+          title(['TW ' num2str(t_ftimwin{tf}) ' s'])
+        else
+          title(['TW ' num2str(t_ftimwin{tf}*cfg.foi) ' per.'])
+        end
+      end
+      set(get(140+tt,'Children'),'XTickLabel',{'Kc 1' 'Kc 2' 'Kc 3' })
+      %       legend({'cfg.foi 1 Hz' '2 Hz' '3 Hz' '4 Hz'})
+    end
+  
+end % run9
