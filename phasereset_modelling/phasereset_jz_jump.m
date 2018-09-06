@@ -9,9 +9,9 @@ function [signal,phaseatstart,phaseatreset] = phasereset_jz_jump (time, wavefr, 
 %  wavefr - frequency of the sinusoid which is being reset
 %  startpos - position of the reset start [sample of the time input]
 %  resetpos - position of the final/actual reset [sample of the time input]
-%  numones - number of 'ones' to go into mean of amplitude to approach one
-%            at time of resetpos; The higher the number, the tighter the
-%            range of values across trials that amplitude at resetpos will be
+%  resetwin - duration of flexible window after input resetpos that actual
+%             resetpos will occur
+
 % Output:
 %  signal - simulated EEG signal; vector: 1 by frames*epochs containing concatenated trials
 %  phaseatstart - ongoing random phase at startpos
